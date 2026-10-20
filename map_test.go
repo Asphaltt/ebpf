@@ -35,6 +35,49 @@ var (
 	}
 )
 
+func TestMapCreateDiagnostics(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("requires Linux")
+	}
+	m, err := NewMap(&MapSpec{
+		Type: Array, KeySize: 4, ValueSize: 4, MaxEntries: 1, MapExtra: 1,
+	})
+	if m != nil {
+		m.Close()
+		t.Fatal("invalid map was created")
+	}
+	qt.Assert(t, qt.ErrorIs(err, unix.EINVAL))
+
+	support := sys.HaveCommonAttrs()
+	if errors.Is(support, internal.ErrNotSupported) {
+		return
+	}
+	qt.Assert(t, qt.IsNil(support))
+	qt.Assert(t, qt.StringContains(err.Error(), "map_extra"))
+}
+
+func TestMapCreateWithLog(t *testing.T) {
+	err := sys.HaveCommonAttrs()
+	testutils.SkipIfNotSupported(t, err)
+	qt.Assert(t, qt.IsNil(err))
+
+	attr := sys.MapCreateAttr{
+		MapType: sys.BPF_MAP_TYPE_ARRAY, KeySize: 4, ValueSize: 4, MaxEntries: 1,
+	}
+	fd, err := mapCreateWithLog(&attr, unix.EINTR)
+	qt.Assert(t, qt.IsNil(err))
+	qt.Assert(t, qt.IsNil(fd.Close()))
+
+	// The diagnostic call fails with EINVAL, but the original error and
+	// token capability information must remain available to the caller.
+	attr.MapExtra = 1
+	original := fmt.Errorf("%w: %w", unix.EPERM, sys.ErrTokenCapabilities)
+	_, err = mapCreateWithLog(&attr, original)
+	qt.Assert(t, qt.ErrorIs(err, unix.EPERM))
+	qt.Assert(t, qt.ErrorIs(err, sys.ErrTokenCapabilities))
+	qt.Assert(t, qt.StringContains(err.Error(), "map_extra"))
+}
+
 func TestMap(t *testing.T) {
 	m := createMap(t, Array, 2)
 
